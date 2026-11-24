@@ -37,7 +37,7 @@ const DEFAULT_TANKS = [
 ];
 
 const DEFAULT_SETTINGS = {
-  api_base_url: 'http://127.0.0.1:8000',
+  api_base_url: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000',
   auto_sync: true,
   inspector_name: '',
 };
