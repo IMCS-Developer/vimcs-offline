@@ -35,7 +35,13 @@ export default function SoundingFormPage({
     const initial = {};
     if (editRecord && editRecord.items) {
       editRecord.items.forEach((item) => {
-        initial[item.tank_id || item.tank] = {
+        const matched = activeTanks.find(
+          (t) =>
+            t.id === (item.tank_id || item.tank) ||
+            (item.tank_code && t.code && t.code.toUpperCase() === item.tank_code.toUpperCase())
+        );
+        const key = matched ? matched.id : (item.tank_id || item.tank);
+        initial[key] = {
           sounding_cm: item.sounding_cm || '',
           notes: item.notes || '',
         };
@@ -62,7 +68,13 @@ export default function SoundingFormPage({
 
       const loaded = {};
       (editRecord.items || []).forEach((item) => {
-        loaded[item.tank_id || item.tank] = {
+        const matched = activeTanks.find(
+          (t) =>
+            t.id === (item.tank_id || item.tank) ||
+            (item.tank_code && t.code && t.code.toUpperCase() === item.tank_code.toUpperCase())
+        );
+        const key = matched ? matched.id : (item.tank_id || item.tank);
+        loaded[key] = {
           sounding_cm: item.sounding_cm,
           notes: item.notes || '',
         };
@@ -115,14 +127,21 @@ export default function SoundingFormPage({
       return;
     }
 
-    const items = calculatedRows.map((row) => ({
-      tank_id: row.tank.id,
-      tank_code: row.tank.code,
-      sounding_cm: row.cm,
-      liter_per_cm: row.factor,
-      volume_liters: row.vol,
-      notes: row.notes,
-    }));
+    const items = calculatedRows.map((row) => {
+      let tid = row.tank.id;
+      if (typeof tid !== 'number' && row.tank.server_id && typeof row.tank.server_id === 'number') {
+        tid = row.tank.server_id;
+      }
+
+      return {
+        tank_id: tid,
+        tank_code: row.tank.code,
+        sounding_cm: row.cm,
+        liter_per_cm: row.factor,
+        volume_liters: row.vol,
+        notes: row.notes,
+      };
+    });
 
     const payload = {
       ...(editRecord ? { id: editRecord.id, server_id: editRecord.server_id } : {}),

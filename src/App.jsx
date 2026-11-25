@@ -57,6 +57,14 @@ export default function App() {
   const handleSyncAll = useCallback(async () => {
     setIsSyncing(true);
     try {
+      // 1. Tarik master tangki terbaru terlebih dahulu agar mapping tank_id tersinkronisasi
+      try {
+        await apiService.pullMasterTanks();
+      } catch (err) {
+        console.warn('Gagal menarik master tangki sebelum sinkronisasi:', err);
+      }
+
+      // 2. Kirim antrean kalkulasi ke server
       const res = await apiService.syncCalculations();
       if (res.success) {
         showToast(res.message, res.synced_count > 0 ? 'success' : 'info');
@@ -163,7 +171,15 @@ export default function App() {
 
     // Push jika online
     if (isOnline && isServerReachable) {
-      apiService.pushTankToServer(saved);
+      try {
+        const serverTank = await apiService.pushTankToServer(saved);
+        if (serverTank && serverTank.id) {
+          storageService.saveTank({ ...saved, id: serverTank.id, server_id: serverTank.id });
+          reloadData();
+        }
+      } catch (err) {
+        console.warn('Gagal push tangki ke server secara langsung:', err);
+      }
     }
   };
 

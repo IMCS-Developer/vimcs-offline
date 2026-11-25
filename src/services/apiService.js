@@ -70,23 +70,66 @@ export const apiService = {
     }
 
     try {
+      const allTanks = storageService.getTanks();
+
       const payload = {
-        records: pendingCalcs.map((calc) => ({
-          offline_id: calc.id,
-          server_id: calc.server_id || null,
-          calculation_date: calc.calculation_date,
-          calculation_time: calc.calculation_time,
-          shift: calc.shift,
-          recorded_by: calc.recorded_by,
-          notes: calc.notes,
-          items: (calc.items || []).map((item) => ({
-            tank_id: item.tank_id || item.tank,
-            tank_code: item.tank_code,
-            sounding_cm: item.sounding_cm,
-            liter_per_cm: item.liter_per_cm,
-            notes: item.notes,
-          })),
-        })),
+        records: pendingCalcs.map((calc) => {
+          let serverId = calc.server_id;
+          if (typeof serverId === 'string' && /^\d+$/.test(serverId.trim())) {
+            serverId = parseInt(serverId.trim(), 10);
+          } else if (typeof serverId !== 'number') {
+            serverId = null;
+          }
+
+          return {
+            offline_id: calc.id,
+            server_id: serverId,
+            calculation_date: calc.calculation_date,
+            calculation_time: calc.calculation_time,
+            shift: calc.shift,
+            recorded_by: calc.recorded_by,
+            notes: calc.notes,
+            items: (calc.items || []).map((item) => {
+              const rawTankId = item.tank_id || item.tank;
+              let numericTankId = null;
+
+              // 1. Cek apakah rawTankId sudah numerik
+              if (typeof rawTankId === 'number') {
+                numericTankId = rawTankId;
+              } else if (typeof rawTankId === 'string' && /^\d+$/.test(rawTankId.trim())) {
+                numericTankId = parseInt(rawTankId.trim(), 10);
+              } else {
+                // 2. Jika offline ID (misal: 'tk_...'), cari di master tangki lokal
+                const matchedTank = allTanks.find(
+                  (t) =>
+                    t.id === rawTankId ||
+                    (item.tank_code &&
+                      t.code &&
+                      t.code.toUpperCase() === item.tank_code.toUpperCase())
+                );
+                if (matchedTank) {
+                  if (typeof matchedTank.id === 'number') {
+                    numericTankId = matchedTank.id;
+                  } else if (
+                    matchedTank.server_id &&
+                    (typeof matchedTank.server_id === 'number' ||
+                      /^\d+$/.test(String(matchedTank.server_id).trim()))
+                  ) {
+                    numericTankId = parseInt(String(matchedTank.server_id).trim(), 10);
+                  }
+                }
+              }
+
+              return {
+                tank_id: numericTankId, // Hanya kirim number atau null (jangan string 'tk_...')
+                tank_code: item.tank_code,
+                sounding_cm: item.sounding_cm,
+                liter_per_cm: item.liter_per_cm,
+                notes: item.notes,
+              };
+            }),
+          };
+        }),
       };
 
       const response = await fetch(`${baseUrl}/api/jetty-calculations/bulk-sync/`, {
@@ -99,7 +142,14 @@ export const apiService = {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        let errDetail = `HTTP ${response.status}: ${response.statusText}`;
+        try {
+          const errData = await response.json();
+          if (errData.detail || errData.error || errData.message) {
+            errDetail = errData.detail || errData.error || errData.message;
+          }
+        } catch (_) {}
+        throw new Error(errDetail);
       }
 
       const resData = await response.json();

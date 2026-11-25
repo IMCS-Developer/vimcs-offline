@@ -73,8 +73,52 @@ export const storageService = {
     try {
       localStorage.setItem(STORAGE_KEYS.TANKS, JSON.stringify(tanks));
       window.dispatchEvent(new Event('vimcs:tanks-changed'));
+
+      // Rekonsiliasi tank_id pada kalkulasi lokal yang masih memakai ID offline sementara ('tk_...')
+      this.reconcileCalculationTankIds(tanks);
     } catch (e) {
       console.error('Error saving tanks to localStorage:', e);
+    }
+  },
+
+  reconcileCalculationTankIds(tanks) {
+    if (!Array.isArray(tanks) || tanks.length === 0) return;
+    const calculations = this.getCalculations();
+    let hasChanges = false;
+
+    const tankCodeMap = {};
+    tanks.forEach((t) => {
+      if (t.code) {
+        tankCodeMap[t.code.toUpperCase()] = t.id;
+      }
+    });
+
+    const updatedCalcs = calculations.map((calc) => {
+      let calcUpdated = false;
+      const newItems = (calc.items || []).map((item) => {
+        const codeKey = (item.tank_code || '').toUpperCase();
+        const serverId = tankCodeMap[codeKey];
+        if (serverId && item.tank_id !== serverId) {
+          calcUpdated = true;
+          return { ...item, tank_id: serverId };
+        }
+        return item;
+      });
+
+      if (calcUpdated) {
+        hasChanges = true;
+        return { ...calc, items: newItems };
+      }
+      return calc;
+    });
+
+    if (hasChanges) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.CALCULATIONS, JSON.stringify(updatedCalcs));
+        window.dispatchEvent(new Event('vimcs:calculations-changed'));
+      } catch (e) {
+        console.error('Error reconciling calculations tank ids:', e);
+      }
     }
   },
 
@@ -90,8 +134,12 @@ export const storageService = {
     };
 
     if (cleanTank.id) {
-      // Update existing
-      const index = tanks.findIndex((t) => t.id === cleanTank.id);
+      // Update existing by id atau by code (case-insensitive)
+      const index = tanks.findIndex(
+        (t) =>
+          t.id === cleanTank.id ||
+          (cleanTank.code && t.code && t.code.toUpperCase() === cleanTank.code.toUpperCase())
+      );
       if (index !== -1) {
         tanks[index] = { ...tanks[index], ...cleanTank };
       } else {
@@ -141,6 +189,7 @@ export const storageService = {
     let totalCm = 0;
     let totalLiters = 0;
     const summaries = [];
+    const allTanks = this.getTanks();
 
     const calculatedItems = (data.items || []).map((item) => {
       const cm = parseFloat(item.sounding_cm) || 0;
@@ -150,13 +199,29 @@ export const storageService = {
       totalCm += cm;
       totalLiters += vol;
 
-      const tankCode = item.tank_code || `TK-${item.tank_id || 'X'}`;
+      // Pastikan tank_id mengutamakan ID numerik jika master tangki sudah memilikinya
+      let tankId = item.tank_id;
+      if (typeof tankId !== 'number') {
+        const matchedTank = allTanks.find(
+          (t) =>
+            t.id === tankId ||
+            (item.tank_code && t.code && t.code.toUpperCase() === item.tank_code.toUpperCase())
+        );
+        if (matchedTank && typeof matchedTank.id === 'number') {
+          tankId = matchedTank.id;
+        } else if (matchedTank && typeof matchedTank.server_id === 'number') {
+          tankId = matchedTank.server_id;
+        }
+      }
+
+      const tankCode = item.tank_code || `TK-${tankId || 'X'}`;
       const volFormatted = vol.toLocaleString('id-ID', { maximumFractionDigits: 0 });
       const cmFormatted = cm.toLocaleString('id-ID', { maximumFractionDigits: 1 });
       summaries.push(`${tankCode}: ${cmFormatted} cm (${volFormatted} L)`);
 
       return {
         ...item,
+        tank_id: tankId,
         sounding_cm: cm,
         liter_per_cm: factor,
         volume_liters: vol,
